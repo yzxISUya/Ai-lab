@@ -22,7 +22,8 @@ import torch
 from transformers import GPT2LMHeadModel
 
 from src import config
-from src.tokenizer import EOT_ID, CharTokenizer
+from src.generate import GenerationConfig, generate_story
+from src.tokenizer import CharTokenizer
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,51 +40,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-@torch.no_grad()
-def generate_story(
-    model: GPT2LMHeadModel,
-    tokenizer: CharTokenizer,
-    prompt: str,
-    args: argparse.Namespace,
-    device: str,
-) -> str:
-    context_size = model.config.n_positions
-    prompt_ids = tokenizer.encode(prompt) or [EOT_ID]
-    model_ids = prompt_ids[-context_size:]  # 取提示词的末尾作为条件
-    generated: list[int] = []
-    remaining = args.max_new_tokens
-
-    while remaining > 0:
-        if len(model_ids) >= context_size:
-            model_ids = model_ids[-(context_size // 2) :]
-        n_new = min(remaining, context_size - len(model_ids))
-
-        input_ids = torch.tensor([model_ids], device=device)
-        output = model.generate(
-            input_ids,
-            attention_mask=torch.ones_like(input_ids),
-            max_new_tokens=n_new,
-            do_sample=True,
-            temperature=args.temperature,
-            top_k=args.top_k,
-            top_p=args.top_p,
-            repetition_penalty=args.repetition_penalty,
-            use_cache=True,  # 推理加速：复用历史 key/value
-            eos_token_id=EOT_ID,
-            pad_token_id=EOT_ID,
-        )
-        new_ids = output[0, len(model_ids) :].tolist()
-        model_ids = output[0].tolist()
-        remaining -= len(new_ids)
-
-        if EOT_ID in new_ids:
-            generated.extend(new_ids[: new_ids.index(EOT_ID) + 1])
-            break
-        generated.extend(new_ids)
-
-    return tokenizer.decode(prompt_ids + generated)
-
-
 def main() -> None:
     args = parse_args()
     if not (args.model_dir / "config.json").exists():
@@ -92,14 +48,23 @@ def main() -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     tokenizer = CharTokenizer.load(args.model_dir / "tokenizer.json")
     model = GPT2LMHeadModel.from_pretrained(args.model_dir).to(device).eval()
+    model.config.use_cache = True
     print(
         f"model: {sum(p.numel() for p in model.parameters()) / 1e6:.1f}M params, "
         f"context: {model.config.n_positions} tokens, device: {device}"
     )
 
+    gen = GenerationConfig(
+        max_new_tokens=args.max_new_tokens,
+        temperature=args.temperature,
+        top_k=args.top_k,
+        top_p=args.top_p,
+        repetition_penalty=args.repetition_penalty,
+    )
+
     for i in range(args.num_samples):
         torch.manual_seed(args.seed + i)
-        text = generate_story(model, tokenizer, args.prompt, args, device)
+        text = generate_story(model, tokenizer, args.prompt, gen, device)
         print(f"\n{'=' * 20} sample {i + 1} {'=' * 20}\n{text.strip()}")
 
 
