@@ -47,6 +47,8 @@ uv run python scripts/check_env.py
 
 > 早期实验使用 256 上下文，参数量为 10,774,656；对应 checkpoint 仍然可以加载。
 
+完整的模型说明（用途、数据、训练、评估与局限）见 [ModelCard.md](ModelCard.md)。
+
 结构就是标准的 decoder-only Transformer：
 
 token embedding + position embedding → 6 × (causal self-attention → residual/LayerNorm → MLP → residual/LayerNorm) → lm_head
@@ -92,11 +94,12 @@ uv run nano-gpt-web
 
 这是 TinyStories **字符级续写模型**，不是指令/聊天模型，所以它只会顺着 prompt
 继续编故事。服务默认只监听 `127.0.0.1`，在 WSL 里启动后直接用 Windows 浏览器访问
-`localhost` 即可
+`localhost` 即可。
 
 ## 文件结构
 
 ```
+ModelCard.md        模型卡：用途 / 数据 / 训练 / 评估 / 局限
 src/
   __init__.py      包的版本信息
   config.py        所有默认配置：路径 / 数据 / 模型 / 训练 / 采样 / 网页
