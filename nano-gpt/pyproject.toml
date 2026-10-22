@@ -1,0 +1,27 @@
+[project]
+name = "nano-gpt"
+version = "0.1.0"
+description = "A tiny GPT trained from scratch on TinyStories"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "accelerate>=1.15.0",
+    "numpy>=2.5.4",
+    "pyarrow>=26.0.0",
+    "torch>=2.14.1",
+    "tqdm>=4.70.1",
+    "transformers>=5.20.1",
+]
+
+[project.scripts]
+nano-gpt-prepare = "src.prepare_data:main"
+nano-gpt-train = "src.train:main"
+nano-gpt-sample = "src.sample:main"
+
+[build-system]
+requires = ["uv_build>=0.12.10,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "src"
+module-root = "."
