@@ -188,6 +188,44 @@ def test_compute_targets_uses_target_network_when_enabled() -> None:
     assert torch.allclose(targets, expected)
 
 
+def test_double_dqn_requires_target_network() -> None:
+    with pytest.raises(ValueError):
+        DQNConfig(double_dqn=True, use_target_network=False)
+
+
+def test_compute_targets_double_dqn_separates_selection_and_evaluation() -> None:
+    agent = DQNAgent(
+        DQNConfig(
+            gamma=0.9,
+            bootstrap_truncated=False,
+            use_target_network=True,
+            double_dqn=True,
+            seed=0,
+        )
+    )
+    # 在线网络选动作 0；目标网络的 max 是动作 1，但动作 0 的值是 0。
+    agent.model = FixedQNet([[10.0, 0.0, 0.0]])
+    agent.target_model = FixedQNet([[0.0, 5.0, 0.0]])
+
+    targets = agent.compute_targets(_target_batch())
+
+    # Double：用在线网络选 0，再用目标网络取 Q(0)=0。
+    expected = torch.tensor([1.0, 2.0 + 0.9 * 0.0, 3.0])
+    assert torch.allclose(targets, expected)
+
+    # 对照：普通 target max 会取目标网络的 5，target 变成 2 + 0.9*5。
+    agent.config = DQNConfig(
+        gamma=0.9,
+        bootstrap_truncated=False,
+        use_target_network=True,
+        double_dqn=False,
+        seed=0,
+    )
+    standard_targets = agent.compute_targets(_target_batch())
+    expected_standard = torch.tensor([1.0, 2.0 + 0.9 * 5.0, 3.0])
+    assert torch.allclose(standard_targets, expected_standard)
+
+
 # ----------------------------------------------------------------------
 # 目标网络
 # ----------------------------------------------------------------------
@@ -307,7 +345,13 @@ def test_checkpoint_roundtrip(tmp_path) -> None:
 
 def test_checkpoint_roundtrip_preserves_target_network(tmp_path) -> None:
     agent = DQNAgent(
-        DQNConfig(seed=123, hidden_size=16, use_target_network=True, target_sync_every=10)
+        DQNConfig(
+            seed=123,
+            hidden_size=16,
+            use_target_network=True,
+            target_sync_every=10,
+            double_dqn=True,
+        )
     )
     agent.train_step(_update_batch())
     agent.sync_target()
@@ -317,6 +361,7 @@ def test_checkpoint_roundtrip_preserves_target_network(tmp_path) -> None:
     loaded = DQNAgent.load(path, device="cpu")
 
     assert loaded.config.use_target_network
+    assert loaded.config.double_dqn
     assert loaded.updates == agent.updates == 1
     assert loaded.target_syncs == agent.target_syncs == 1
     for expected, actual in zip(

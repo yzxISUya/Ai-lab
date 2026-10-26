@@ -65,6 +65,9 @@ class DQNConfig:
     ``use_target_network`` 是 Stage 2 的第一个稳定性开关：target 用一套延迟更新的
     参数，避免在线网络每一步追自己。``target_sync_every`` 以 ``train_step`` 次数
     为单位，不是环境步数。
+
+    ``double_dqn`` 把“选动作”和“评估动作”分开：在线网络选 argmax，目标网络评估。
+    它依赖目标网络，所以 ``double_dqn=True`` 时要求 ``use_target_network=True``。
     """
 
     obs_size: int = 11
@@ -80,6 +83,7 @@ class DQNConfig:
     bootstrap_truncated: bool = False
     use_target_network: bool = False
     target_sync_every: int = 1000
+    double_dqn: bool = False
     seed: int = 0
 
     def __post_init__(self) -> None:
@@ -105,6 +109,8 @@ class DQNConfig:
             raise ValueError("epsilon_decay_games 不能为负")
         if self.target_sync_every < 1:
             raise ValueError("target_sync_every 至少为 1")
+        if self.double_dqn and not self.use_target_network:
+            raise ValueError("double_dqn 需要 use_target_network=True")
 
 
 @dataclass(frozen=True)

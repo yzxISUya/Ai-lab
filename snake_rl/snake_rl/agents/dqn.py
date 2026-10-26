@@ -206,7 +206,13 @@ class DQNAgent:
         with torch.no_grad():
             # 有目标网络时用延迟参数算 target；否则退回 Stage 1 的在线网络。
             target_net = self.target_model if self.config.use_target_network else self.model
-            next_q = target_net(next_obs).max(dim=1).values
+            target_values = target_net(next_obs)
+            if self.config.double_dqn:
+                # Double DQN：在线网络选动作，目标网络评估这个动作。
+                next_actions = self.model(next_obs).argmax(dim=1, keepdim=True)
+                next_q = target_values.gather(1, next_actions).squeeze(1)
+            else:
+                next_q = target_values.max(dim=1).values
             done = terminated if self.config.bootstrap_truncated else (terminated | truncated)
             return rewards + self.config.gamma * next_q * (~done).float()
 

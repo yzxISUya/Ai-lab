@@ -304,6 +304,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help="Stage 2：用延迟更新的目标网络计算 TD target")
     parser.add_argument("--target-sync-every", type=int, default=1000,
                         help="每多少次 train_step 把在线网络同步到目标网络")
+    parser.add_argument("--double-dqn", action="store_true",
+                        help="Stage 2：在线网络选动作、目标网络评估（需要目标网络）")
 
     # 其他
     parser.add_argument("--seed", type=int, default=0)
@@ -333,6 +335,7 @@ def main() -> None:
         bootstrap_truncated=args.bootstrap_truncated,
         use_target_network=args.use_target_network,
         target_sync_every=args.target_sync_every,
+        double_dqn=args.double_dqn,
         seed=args.seed,
     )
     output_dir = args.output_dir or f"runs/stage1_seed{args.seed}"
