@@ -61,6 +61,10 @@ class DQNConfig:
 
     ``bootstrap_truncated=False`` 表示 Stage 1 故意复刻参考项目的“把超时当终止”。
     Stage 2 把它改成 True，就能开始做正确的 bootstrap 消融。
+
+    ``use_target_network`` 是 Stage 2 的第一个稳定性开关：target 用一套延迟更新的
+    参数，避免在线网络每一步追自己。``target_sync_every`` 以 ``train_step`` 次数
+    为单位，不是环境步数。
     """
 
     obs_size: int = 11
@@ -74,6 +78,8 @@ class DQNConfig:
     epsilon_end: float = 0.0
     epsilon_decay_games: int = 80
     bootstrap_truncated: bool = False
+    use_target_network: bool = False
+    target_sync_every: int = 1000
     seed: int = 0
 
     def __post_init__(self) -> None:
@@ -97,6 +103,8 @@ class DQNConfig:
             raise ValueError("epsilon_end 必须在 [0, 1]")
         if self.epsilon_decay_games < 0:
             raise ValueError("epsilon_decay_games 不能为负")
+        if self.target_sync_every < 1:
+            raise ValueError("target_sync_every 至少为 1")
 
 
 @dataclass(frozen=True)

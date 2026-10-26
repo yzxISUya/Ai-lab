@@ -119,6 +119,17 @@ class DQNAgent:
             hidden_size=self.config.hidden_size,
             output_size=self.config.n_actions,
         ).to(self.device)
+        # 目标网络：结构和在线网络相同，初始化时参数完全一致。
+        # 即使 use_target_network=False 也保留它，checkpoint 格式更统一；
+        # 此时 compute_targets 会忽略它。
+        self.target_model = QNet(
+            input_size=self.config.obs_size,
+            hidden_size=self.config.hidden_size,
+            output_size=self.config.n_actions,
+        ).to(self.device)
+        self.target_model.load_state_dict(self.model.state_dict())
+        self.target_model.eval()
+
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.config.lr)
         self.criterion = nn.MSELoss()
 
@@ -126,6 +137,8 @@ class DQNAgent:
         self.rng = random.Random(self.config.seed + 1)
 
         self.n_games = 0
+        self.updates = 0
+        self.target_syncs = 0
 
     # ------------------------------------------------------------------
     # 行为
@@ -191,8 +204,9 @@ class DQNAgent:
         truncated = torch.as_tensor(batch.truncated, dtype=torch.bool, device=self.device)
 
         with torch.no_grad():
-            # Stage 1：没有目标网络，直接用在线网络取 max。
-            next_q = self.model(next_obs).max(dim=1).values
+            # 有目标网络时用延迟参数算 target；否则退回 Stage 1 的在线网络。
+            target_net = self.target_model if self.config.use_target_network else self.model
+            next_q = target_net(next_obs).max(dim=1).values
             done = terminated if self.config.bootstrap_truncated else (terminated | truncated)
             return rewards + self.config.gamma * next_q * (~done).float()
 
@@ -214,7 +228,21 @@ class DQNAgent:
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+
+        self.updates += 1
+        if (
+            self.config.use_target_network
+            and self.updates % self.config.target_sync_every == 0
+        ):
+            self.sync_target()
         return float(loss.item())
+
+    def sync_target(self) -> None:
+        """把在线网络参数复制到目标网络，并让目标网络保持 eval 模式。"""
+
+        self.target_model.load_state_dict(self.model.state_dict())
+        self.target_model.eval()
+        self.target_syncs += 1
 
     def train_short_memory(self, transition: Transition) -> float:
         """参考项目的 per-step 单样本更新。"""
@@ -236,8 +264,11 @@ class DQNAgent:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "model": self.model.state_dict(),
+            "target_model": self.target_model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "n_games": self.n_games,
+            "updates": self.updates,
+            "target_syncs": self.target_syncs,
             "dqn_config": asdict(self.config),
             "torch_rng_state": torch.get_rng_state(),
             "action_rng_state": self.rng.getstate(),
@@ -256,8 +287,16 @@ class DQNAgent:
         config = DQNConfig(**payload["dqn_config"])
         agent = cls(config, device=device)
         agent.model.load_state_dict(payload["model"])
+        # 兼容 Stage 1 的旧 checkpoint：没有 target_model 时从在线网络复制。
+        if "target_model" in payload:
+            agent.target_model.load_state_dict(payload["target_model"])
+        else:
+            agent.target_model.load_state_dict(agent.model.state_dict())
+        agent.target_model.eval()
         agent.optimizer.load_state_dict(payload["optimizer"])
         agent.n_games = int(payload.get("n_games", 0))
+        agent.updates = int(payload.get("updates", 0))
+        agent.target_syncs = int(payload.get("target_syncs", 0))
 
         if "torch_rng_state" in payload:
             torch.set_rng_state(payload["torch_rng_state"].cpu())

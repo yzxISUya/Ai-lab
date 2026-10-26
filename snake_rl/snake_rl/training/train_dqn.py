@@ -39,6 +39,7 @@ TRAIN_FIELDS = [
     "epsilon",
     "short_loss",
     "long_loss",
+    "target_syncs",
     "wall",
     "self",
     "timeout",
@@ -171,6 +172,7 @@ def run_training(
                             "epsilon": epsilon,
                             "short_loss": short_loss,
                             "long_loss": "" if long_loss is None else long_loss,
+                            "target_syncs": agent.target_syncs,
                             "wall": int(ending == "wall"),
                             "self": int(ending == "self"),
                             "timeout": int(ending == "timeout"),
@@ -245,6 +247,8 @@ def run_training(
         "output_dir": str(output_dir),
         "train_seconds": elapsed,
         "train_steps": total_steps,
+        "updates": agent.updates,
+        "target_syncs": agent.target_syncs,
         "steps_per_second": (total_steps / elapsed) if elapsed else 0.0,
         "final_eval": None if final_eval is None else final_eval.to_dict(),
         "env_config": asdict(env_config),
@@ -296,6 +300,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--epsilon-decay-games", type=int, default=80)
     parser.add_argument("--bootstrap-truncated", action="store_true",
                         help="Stage 2 的正确做法：截断时仍 bootstrap（Stage 1 默认关闭）")
+    parser.add_argument("--use-target-network", action="store_true",
+                        help="Stage 2：用延迟更新的目标网络计算 TD target")
+    parser.add_argument("--target-sync-every", type=int, default=1000,
+                        help="每多少次 train_step 把在线网络同步到目标网络")
 
     # 其他
     parser.add_argument("--seed", type=int, default=0)
@@ -323,6 +331,8 @@ def main() -> None:
         epsilon_end=args.epsilon_end,
         epsilon_decay_games=args.epsilon_decay_games,
         bootstrap_truncated=args.bootstrap_truncated,
+        use_target_network=args.use_target_network,
+        target_sync_every=args.target_sync_every,
         seed=args.seed,
     )
     output_dir = args.output_dir or f"runs/stage1_seed{args.seed}"

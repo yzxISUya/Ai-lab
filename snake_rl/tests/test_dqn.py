@@ -174,6 +174,86 @@ def test_compute_targets_bootstraps_truncation_when_enabled() -> None:
     assert torch.allclose(targets, expected)
 
 
+def test_compute_targets_uses_target_network_when_enabled() -> None:
+    agent = DQNAgent(
+        DQNConfig(gamma=0.9, bootstrap_truncated=False, use_target_network=True, seed=0)
+    )
+    agent.model = FixedQNet([[9.0, 9.0, 9.0]])
+    agent.target_model = FixedQNet([[1.0, 2.0, 3.0]])
+
+    targets = agent.compute_targets(_target_batch())
+
+    # 如果用在线网络，max 会是 9；这里必须是目标网络的 max=3。
+    expected = torch.tensor([1.0, 2.0 + 0.9 * 3.0, 3.0])
+    assert torch.allclose(targets, expected)
+
+
+# ----------------------------------------------------------------------
+# 目标网络
+# ----------------------------------------------------------------------
+def _update_batch() -> Batch:
+    return Batch.from_transitions(
+        [
+            transition(action=0, reward=1.0),
+            transition(action=1, reward=-1.0, terminated=True),
+            transition(action=2, reward=0.0),
+        ]
+    )
+
+
+def test_target_network_starts_equal_and_stays_frozen_between_syncs() -> None:
+    agent = DQNAgent(
+        DQNConfig(seed=0, hidden_size=16, use_target_network=True, target_sync_every=10)
+    )
+
+    for online, target in zip(agent.model.parameters(), agent.target_model.parameters()):
+        assert torch.equal(online, target)
+
+    target_before = [p.detach().clone() for p in agent.target_model.parameters()]
+    agent.train_step(_update_batch())
+
+    assert all(
+        torch.equal(before, after)
+        for before, after in zip(target_before, agent.target_model.parameters())
+    )
+    assert agent.updates == 1
+    assert agent.target_syncs == 0
+
+
+def test_sync_target_copies_online_parameters() -> None:
+    agent = DQNAgent(
+        DQNConfig(seed=0, hidden_size=16, use_target_network=True, target_sync_every=100)
+    )
+    agent.train_step(_update_batch())
+
+    assert any(
+        not torch.equal(online, target)
+        for online, target in zip(agent.model.parameters(), agent.target_model.parameters())
+    )
+
+    agent.sync_target()
+
+    for online, target in zip(agent.model.parameters(), agent.target_model.parameters()):
+        assert torch.equal(online, target)
+    assert agent.target_syncs == 1
+
+
+def test_target_network_syncs_every_n_updates() -> None:
+    agent = DQNAgent(
+        DQNConfig(seed=0, hidden_size=16, use_target_network=True, target_sync_every=2)
+    )
+    batch = _update_batch()
+
+    agent.train_step(batch)
+    assert (agent.updates, agent.target_syncs) == (1, 0)
+
+    agent.train_step(batch)
+    assert (agent.updates, agent.target_syncs) == (2, 1)
+
+    for online, target in zip(agent.model.parameters(), agent.target_model.parameters()):
+        assert torch.equal(online, target)
+
+
 # ----------------------------------------------------------------------
 # 更新与 checkpoint
 # ----------------------------------------------------------------------
@@ -223,3 +303,42 @@ def test_checkpoint_roundtrip(tmp_path) -> None:
 
     assert loaded.n_games == 7
     np.testing.assert_allclose(loaded.q_values(obs), q_before, rtol=1e-6, atol=1e-6)
+
+
+def test_checkpoint_roundtrip_preserves_target_network(tmp_path) -> None:
+    agent = DQNAgent(
+        DQNConfig(seed=123, hidden_size=16, use_target_network=True, target_sync_every=10)
+    )
+    agent.train_step(_update_batch())
+    agent.sync_target()
+
+    path = tmp_path / "checkpoint.pt"
+    agent.save(path)
+    loaded = DQNAgent.load(path, device="cpu")
+
+    assert loaded.config.use_target_network
+    assert loaded.updates == agent.updates == 1
+    assert loaded.target_syncs == agent.target_syncs == 1
+    for expected, actual in zip(
+        agent.target_model.parameters(), loaded.target_model.parameters()
+    ):
+        assert torch.equal(expected, actual)
+
+
+def test_load_legacy_checkpoint_without_target_fields(tmp_path) -> None:
+    agent = DQNAgent(DQNConfig(seed=123, hidden_size=16))
+    path = tmp_path / "legacy.pt"
+    agent.save(path)
+
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    payload.pop("target_model", None)
+    payload.pop("updates", None)
+    payload.pop("target_syncs", None)
+    torch.save(payload, path)
+
+    loaded = DQNAgent.load(path, device="cpu")
+
+    for online, target in zip(loaded.model.parameters(), loaded.target_model.parameters()):
+        assert torch.equal(online, target)
+    assert loaded.updates == 0
+    assert loaded.target_syncs == 0
