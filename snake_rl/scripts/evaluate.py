@@ -1,4 +1,4 @@
-r"""用 greedy 策略评估一个 Stage 1 checkpoint。
+r"""用 greedy 策略评估一个 DQN checkpoint。
 
 运行::
 

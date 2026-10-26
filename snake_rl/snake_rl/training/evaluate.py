@@ -12,7 +12,6 @@ from dataclasses import asdict, dataclass
 
 from snake_rl.agents.dqn import DQNAgent
 from snake_rl.env import SnakeEnv
-from snake_rl.env.observations import observe
 
 
 @dataclass
@@ -56,13 +55,13 @@ def evaluate_agent(
 
     for i in range(episodes):
         env.reset(seed=seed + i)
-        obs = observe(env)
+        obs = agent.observation(env)
         last_info: dict = {}
 
         while not env.done:
             action = agent.get_action(obs, greedy=True)
             outcome = env.step(action)
-            obs = observe(env)
+            obs = agent.observation(env)
             last_info = outcome.info
 
             if renderer is not None:

@@ -26,6 +26,11 @@ uv run python scripts/train_dqn.py
 uv run python scripts/train_dqn.py --episodes 5 --eval-every 0 \
     --checkpoint-every 0 --final-eval-episodes 2 --output-dir /tmp/snake_smoke
 
+# Stage 3：全棋盘 CNN
+# 每个 transition 约 2×5×20×20 float32，先用小 replay 控制内存。
+uv run python scripts/train_dqn.py --obs-type board --board-channels 5 \
+    --episodes 500 --max-memory 20000 --output-dir runs/stage3_board_seed0
+
 # 用 greedy 策略评估 checkpoint
 uv run python scripts/evaluate.py --run-dir runs/stage1_seed0 --episodes 100
 
@@ -39,9 +44,14 @@ uv run python scripts/random_agent.py --episodes 100
 uv run python scripts/play_human.py
 ```
 
-`--device` 可选 `cpu` / `cuda` / `auto`。默认 `cpu`：网络只有
+`--device` 可选 `cpu` / `cuda` / `auto`。默认 `cpu`：11 维网络只有
 `11 → 256 → 3`，每步做一次 batch=1 更新，实测 GPU 反而慢约 5 倍。
 详见 [`pyproject.toml`](pyproject.toml) 里的注释。
+
+全棋盘 CNN（`--obs-type board`）计算量大得多，CPU 只适合 smoke test；
+正式训练建议 GPU（需要换 CUDA 版 torch）。全棋盘 replay 也比 11 维大很多：
+每个 transition 约 `2 × C × H × W` 个 float32，100k 条约 1.6GB（5 通道、20×20），
+建议先用 `--max-memory 20000`。
 
 ### WSL 下的线程数（重要）
 
@@ -66,7 +76,7 @@ snake_rl/
 ├── snake_rl/          # 包
 │   ├── config.py      # EnvConfig / DQNConfig / TrainConfig
 │   ├── env/           # 纯逻辑环境、11 维观察、pygame 渲染
-│   ├── models/        # QNet
+│   ├── models/        # QNet（11 维 MLP）/ BoardQNet（全棋盘 CNN）
 │   ├── agents/        # DQNAgent + ReplayBuffer
 │   └── training/      # 训练循环、评估、CSV 日志
 ├── scripts/           # 命令行入口
@@ -77,13 +87,21 @@ snake_rl/
 
 ## 阶段进度
 
-| 阶段    | 主题                                           | 状态   |
-| ------- | ---------------------------------------------- | ------ |
-| Stage 0 | 环境、渲染、随机基线                           | 完成   |
-| Stage 1 | 复刻 DQN 基线                                  | 完成   |
-| Stage 2 | 目标网络 / Double DQN / Huber / 截断 bootstrap | 下一步 |
-| Stage 3 | 观察与奖励工程                                 | 待做   |
-| Stage 4 | PPO 对比                                       | 待做   |
+| 阶段    | 主题                                           | 状态                           |
+| ------- | ---------------------------------------------- | ------------------------------ |
+| Stage 0 | 环境、渲染、随机基线                           | 完成                           |
+| Stage 1 | 复刻 DQN 基线                                  | 完成                           |
+| Stage 2 | 目标网络 / Double DQN / Huber / 截断 bootstrap | 基本完成（Double 保留）        |
+| Stage 3 | 观察与奖励工程                                 | 代码就绪（全棋盘 CNN），待训练 |
+| Stage 4 | PPO 对比                                       | 待做                           |
+
+### 观察编码（Stage 3）
+
+- `--obs-type features11`（默认）：11 维手工特征，Stage 1/2 使用。
+- `--obs-type board`：`(C, H, W)` 棋盘张量，交给 `BoardQNet`：
+  - 通道：`body` / `head` / `tail` / `food` / `border`；
+  - `--board-channels 4` 可以去掉 `border` 通道；
+  - checkpoint、训练、评估会自动使用同一种编码。
 
 Stage 1 最终结果（100 局 greedy eval，训练/评估种子分离）：
 **mean 27.14 / median 26 / max 52 / std 10.13**，95/100 死于 self collision。

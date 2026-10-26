@@ -3,6 +3,11 @@
 环境只负责游戏逻辑，不依赖 pygame；渲染在 :mod:`snake_rl.env.renderer` 中。
 """
 
+from .board_observations import (
+    BOARD_CHANNEL_NAMES,
+    BOARD_CHANNELS,
+    observe_board,
+)
 from .snake_env import (
     Action,
     Direction,
@@ -21,4 +26,7 @@ __all__ = [
     "SnakeState",
     "StepOutcome",
     "relative_action",
+    "BOARD_CHANNEL_NAMES",
+    "BOARD_CHANNELS",
+    "observe_board",
 ]

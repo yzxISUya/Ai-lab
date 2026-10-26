@@ -71,9 +71,19 @@ class DQNConfig:
 
     ``huber=True`` 用 SmoothL1 代替 MSE，降低大 TD error 的影响。Huber 的 loss
     数值尺度和 MSE 不同，不能直接比较两者的 loss 大小。
+
+    ``obs_type`` 选择观察编码：
+    - ``"features11"``：Stage 1/2 的 11 维手工特征；
+    - ``"board"``：完整棋盘，形状 ``(board_channels, board_height, board_width)``，
+      交给 CNN。
+    棋盘模式下 ``obs_size`` 不参与建模，实际输入形状由 board_* 字段决定。
     """
 
     obs_size: int = 11
+    obs_type: str = "features11"
+    board_channels: int = 5
+    board_height: int = 20
+    board_width: int = 20
     n_actions: int = 3
     hidden_size: int = 256
     lr: float = 1e-3
@@ -93,6 +103,12 @@ class DQNConfig:
     def __post_init__(self) -> None:
         if self.obs_size < 1:
             raise ValueError("obs_size 至少为 1")
+        if self.obs_type not in ("features11", "board"):
+            raise ValueError("obs_type 必须是 'features11' 或 'board'")
+        if self.board_channels not in (4, 5):
+            raise ValueError("board_channels 必须是 4（无边界通道）或 5（含边界通道）")
+        if self.board_height < 1 or self.board_width < 1:
+            raise ValueError("board_height/board_width 至少为 1")
         if self.n_actions < 1:
             raise ValueError("n_actions 至少为 1")
         if self.hidden_size < 1:

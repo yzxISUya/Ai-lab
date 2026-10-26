@@ -1,17 +1,12 @@
-"""Stage 1 的 DQN 智能体。
+"""DQN 智能体。
 
-刻意保留参考项目的算法结构：
+支持两种观察/网络组合：
 
-- 11 维观察 -> 2 层 MLP -> 3 个 Q 值；
-- epsilon-greedy；
-- 经验回放；
-- 每步用单个 transition 做一次更新（short memory）；
-- 每局结束用 replay 采样一个 batch 更新（long memory）；
-- **没有目标网络**：target 用在线网络算；
-- **MSE loss**；
-- 默认把 truncation 当成 termination（``bootstrap_truncated=False``）。
+- ``obs_type="features11"``：11 维手工特征 + ``QNet`` MLP（Stage 1/2）；
+- ``obs_type="board"``：``(C, H, W)`` 全棋盘 + ``BoardQNet`` CNN（Stage 3）。
 
-Stage 2 会逐项修：目标网络、Double DQN、Huber、正确的 truncation bootstrap。
+算法部分共享：epsilon-greedy、经验回放、short/long memory、可选目标网络、
+Double DQN、Huber loss。默认仍把 truncation 当成 termination。
 """
 
 from __future__ import annotations
@@ -28,7 +23,10 @@ import torch.nn as nn
 import torch.optim as optim
 
 from snake_rl.config import DQNConfig
-from snake_rl.models import QNet
+from snake_rl.env.board_observations import observe_board
+from snake_rl.env.observations import observe
+from snake_rl.env.snake_env import SnakeEnv
+from snake_rl.models import BoardQNet, QNet
 
 
 class Transition(NamedTuple):
@@ -114,19 +112,11 @@ class DQNAgent:
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(self.config.seed)
 
-        self.model = QNet(
-            input_size=self.config.obs_size,
-            hidden_size=self.config.hidden_size,
-            output_size=self.config.n_actions,
-        ).to(self.device)
+        self.model = self._build_model()
         # 目标网络：结构和在线网络相同，初始化时参数完全一致。
         # 即使 use_target_network=False 也保留它，checkpoint 格式更统一；
         # 此时 compute_targets 会忽略它。
-        self.target_model = QNet(
-            input_size=self.config.obs_size,
-            hidden_size=self.config.hidden_size,
-            output_size=self.config.n_actions,
-        ).to(self.device)
+        self.target_model = self._build_model()
         self.target_model.load_state_dict(self.model.state_dict())
         self.target_model.eval()
 
@@ -139,6 +129,41 @@ class DQNAgent:
         self.n_games = 0
         self.updates = 0
         self.target_syncs = 0
+
+    def _build_model(self) -> nn.Module:
+        """按 obs_type 构建在线/目标网络。"""
+
+        if self.config.obs_type == "board":
+            return BoardQNet(
+                in_channels=self.config.board_channels,
+                height=self.config.board_height,
+                width=self.config.board_width,
+                hidden_size=self.config.hidden_size,
+                output_size=self.config.n_actions,
+            ).to(self.device)
+        return QNet(
+            input_size=self.config.obs_size,
+            hidden_size=self.config.hidden_size,
+            output_size=self.config.n_actions,
+        ).to(self.device)
+
+    def observation(self, env: SnakeEnv) -> np.ndarray:
+        """按当前配置把环境编码成观察。"""
+
+        if self.config.obs_type == "board":
+            obs = observe_board(env, channels=self.config.board_channels)
+            expected = (
+                self.config.board_channels,
+                self.config.board_height,
+                self.config.board_width,
+            )
+            if obs.shape != expected:
+                raise ValueError(
+                    f"棋盘观察形状 {obs.shape} 与模型配置 {expected} 不一致；"
+                    "请确认 --width/--height 与 checkpoint 的 board_height/board_width 一致"
+                )
+            return obs
+        return observe(env)
 
     # ------------------------------------------------------------------
     # 行为

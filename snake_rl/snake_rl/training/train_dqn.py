@@ -1,12 +1,9 @@
-"""Stage 1：训练一个可复现、可评估的 DQN 基线。
+"""训练一个可复现、可评估的 Snake DQN。
 
-算法上刻意贴近参考项目：
-- 11 维观察；
-- 在线网络算 target（没有目标网络）；
-- MSE；
-- 每步单样本更新 + 每局 replay batch 更新；
-- epsilon 从 0.4 线性降到 0；
-- 默认把超时当终止（``bootstrap_truncated=False``）。
+观察/网络由 ``--obs-type`` 选择：
+
+- ``features11``：11 维手工特征 + ``QNet`` MLP（Stage 1/2 基线）；
+- ``board``：``(C, H, W)`` 全棋盘 + ``BoardQNet`` CNN（Stage 3）。
 
 工程上做了这些事：
 - headless 环境，训练不受 pygame 帧率限制；
@@ -27,7 +24,6 @@ from pathlib import Path
 from snake_rl.agents import DQNAgent, Transition
 from snake_rl.config import DQNConfig, EnvConfig, TrainConfig
 from snake_rl.env import SnakeEnv
-from snake_rl.env.observations import observe
 from snake_rl.training.evaluate import evaluate_agent, format_eval
 from snake_rl.training.logging import CSVLogger, save_json
 
@@ -96,7 +92,7 @@ def run_training(
     start_time = time.perf_counter()
     final_eval = None
 
-    print("Stage 1 DQN baseline")
+    print("Snake DQN training")
     print(f"  device: {agent.device}")
     print(f"  env:    {env_config}")
     print(f"  dqn:    {dqn_config}")
@@ -110,7 +106,7 @@ def run_training(
             try:
                 for episode in range(1, train_config.episodes + 1):
                     env.reset(seed=train_config.seed + episode)
-                    obs = observe(env)
+                    obs = agent.observation(env)
                     short_losses: list[float] = []
                     last_info: dict = {}
                     steps = 0
@@ -118,7 +114,7 @@ def run_training(
                     while not env.done:
                         action = agent.get_action(obs)
                         outcome = env.step(action)
-                        next_obs = observe(env)
+                        next_obs = agent.observation(env)
 
                         transition = Transition(
                             obs=obs,
@@ -266,7 +262,7 @@ def run_training(
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Train the Stage 1 DQN baseline",
+        description="Train a Snake DQN agent",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -288,6 +284,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout-factor", type=int, default=100)
     parser.add_argument("--timeout-reward", type=float, default=-10.0,
                         help="参考项目在超时/死亡时都给 -10；Stage 1 默认复刻")
+    parser.add_argument("--obs-type", type=str, default="features11",
+                        choices=["features11", "board"],
+                        help="观察编码：features11（Stage 1/2）或 board（完整棋盘 CNN）")
+    parser.add_argument("--board-channels", type=int, default=5,
+                        help="棋盘通道数：4=body/head/tail/food，5=额外边界距离")
 
     # DQN
     parser.add_argument("--hidden-size", type=int, default=256)
@@ -326,6 +327,10 @@ def main() -> None:
         timeout_reward=args.timeout_reward,
     )
     dqn_config = DQNConfig(
+        obs_type=args.obs_type,
+        board_channels=args.board_channels,
+        board_height=args.height,
+        board_width=args.width,
         hidden_size=args.hidden_size,
         lr=args.lr,
         gamma=args.gamma,

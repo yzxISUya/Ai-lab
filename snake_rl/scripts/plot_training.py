@@ -37,7 +37,7 @@ def as_float(row: dict[str, str], key: str) -> float:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Plot Stage 1 training curves",
+        description="Plot DQN training curves",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--run-dir", type=str, default="runs/stage1_seed0")
@@ -74,7 +74,7 @@ def main() -> None:
         eval_means = [as_float(r, "mean_score") for r in eval_rows]
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))
-    fig.suptitle(f"Stage 1 DQN baseline — {run_dir}")
+    fig.suptitle(f"DQN training — {run_dir}")
 
     ax = axes[0, 0]
     ax.plot(episodes, scores, color="#9ecae1", alpha=0.45, linewidth=1, label="train score")
@@ -95,7 +95,7 @@ def main() -> None:
             label="long loss (episode batch)")
     ax.set_title("TD loss")
     ax.set_xlabel("episode")
-    ax.set_ylabel("MSE loss")
+    ax.set_ylabel("TD loss (MSE / Huber)")
     ax.set_yscale("symlog", linthresh=0.1)
     ax.grid(alpha=0.25)
     ax.legend(fontsize=8)
