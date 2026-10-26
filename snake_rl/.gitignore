@@ -1,0 +1,29 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 训练产物
+runs/
+checkpoints/
+models/
+*.pth
+*.pt
+*.log
+
+# 本地参考项目
+reference/
+
+# 编辑器
+.idea/
+.vscode/
+
+# 草稿
+SHIT/
+teach/

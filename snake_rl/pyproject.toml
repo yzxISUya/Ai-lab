@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "snake-rl"
+version = "0.1.0"
+description = "A progressive reinforcement learning playground: learning Snake with DQN and beyond"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26",
+    "pygame>=2.5",
+]
+
+[project.optional-dependencies]
+train = [
+    "torch>=2.6",
+    "matplotlib>=3.8",
+    "tqdm>=4.66",
+]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["snake_rl*"]
+exclude = ["tests*", "scripts*", "teach*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

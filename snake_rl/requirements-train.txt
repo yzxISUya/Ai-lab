@@ -1,0 +1,4 @@
+# Stage 1 起使用的训练依赖
+torch>=2.6
+matplotlib>=3.8
+tqdm>=4.66
