@@ -90,9 +90,9 @@ def main() -> None:
 
     ax = axes[0, 1]
     ax.plot(episodes, short_loss, color="#ff7f0e", alpha=0.5, linewidth=1,
-            label="short loss (per-step mean)")
+            label="short / per-step loss")
     ax.plot(episodes, long_loss, color="#9467bd", alpha=0.8, linewidth=1,
-            label="long loss (episode batch)")
+            label="replay / episode loss")
     ax.set_title("TD loss")
     ax.set_xlabel("episode")
     ax.set_ylabel("TD loss (MSE / Huber)")

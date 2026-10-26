@@ -9,7 +9,7 @@ import pytest
 import torch
 
 from snake_rl.agents import Batch, DQNAgent, Transition
-from snake_rl.config import DQNConfig, EnvConfig
+from snake_rl.config import DQNConfig, EnvConfig, TrainConfig
 from snake_rl.env import SnakeEnv, observe_board
 from snake_rl.models import BoardQNet
 
@@ -127,3 +127,10 @@ def test_invalid_observation_config() -> None:
         DQNConfig(obs_type="pixels")
     with pytest.raises(ValueError):
         DQNConfig(obs_type="board", board_channels=3)
+
+
+def test_train_config_replay_validation() -> None:
+    with pytest.raises(ValueError):
+        TrainConfig(replay_update_every=-1)
+    with pytest.raises(ValueError):
+        TrainConfig(min_replay_size=-1)

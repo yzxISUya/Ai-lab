@@ -21,6 +21,8 @@ from collections import deque
 from dataclasses import asdict
 from pathlib import Path
 
+import torch
+
 from snake_rl.agents import DQNAgent, Transition
 from snake_rl.config import DQNConfig, EnvConfig, TrainConfig
 from snake_rl.env import SnakeEnv
@@ -36,6 +38,7 @@ TRAIN_FIELDS = [
     "short_loss",
     "long_loss",
     "target_syncs",
+    "replay_updates",
     "wall",
     "self",
     "timeout",
@@ -80,6 +83,13 @@ def run_training(
     env = SnakeEnv(env_config, seed=train_config.seed)
     eval_env = SnakeEnv(env_config, seed=train_config.seed + 10_000)
     agent = DQNAgent(dqn_config, device=train_config.device)
+    if agent.device.type == "cuda":
+        # 固定输入尺寸，cudnn.benchmark 可以帮助选 kernel；TF32 对 RL 足够。
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        # 环境/回放在 CPU 上串行，别让 PyTorch 抢满线程。
+        torch.set_num_threads(1)
 
     renderer = None
     if train_config.render:
@@ -89,6 +99,7 @@ def run_training(
 
     scores_window: deque[int] = deque(maxlen=100)
     total_steps = 0
+    total_replay_updates = 0
     start_time = time.perf_counter()
     final_eval = None
 
@@ -96,6 +107,7 @@ def run_training(
     print(f"  device: {agent.device}")
     print(f"  env:    {env_config}")
     print(f"  dqn:    {dqn_config}")
+    print(f"  train:  {train_config}")
     print(f"  output: {output_dir}")
     print()
 
@@ -108,6 +120,8 @@ def run_training(
                     env.reset(seed=train_config.seed + episode)
                     obs = agent.observation(env)
                     short_losses: list[float] = []
+                    replay_losses: list[float] = []
+                    replay_updates = 0
                     last_info: dict = {}
                     steps = 0
 
@@ -125,14 +139,29 @@ def run_training(
                             truncated=outcome.truncated,
                         )
 
-                        if train_config.short_memory:
-                            short_losses.append(agent.train_short_memory(transition))
-                        agent.remember(transition)
+                        steps += 1
+                        total_steps += 1
+
+                        if train_config.replay_update_every > 0:
+                            # 标准 DQN：先存 replay，再每 N 步采样一个 minibatch。
+                            # 这比 batch=1 的 per-step 更新更适合 GPU。
+                            agent.remember(transition)
+                            if (
+                                total_steps % train_config.replay_update_every == 0
+                                and len(agent.memory) >= train_config.min_replay_size
+                            ):
+                                replay_loss = agent.train_long_memory()
+                                if replay_loss is not None:
+                                    replay_losses.append(replay_loss)
+                                    replay_updates += 1
+                                    total_replay_updates += 1
+                        else:
+                            if train_config.short_memory:
+                                short_losses.append(agent.train_short_memory(transition))
+                            agent.remember(transition)
 
                         obs = next_obs
                         last_info = outcome.info
-                        steps += 1
-                        total_steps += 1
 
                         if renderer is not None:
                             renderer.draw(outcome.state)
@@ -143,7 +172,10 @@ def run_training(
                     score = env.score
                     epsilon = agent.epsilon
                     agent.end_episode()
-                    long_loss = agent.train_long_memory()
+                    if train_config.replay_update_every > 0:
+                        long_loss = statistics.mean(replay_losses) if replay_losses else None
+                    else:
+                        long_loss = agent.train_long_memory()
 
                     scores_window.append(score)
                     mean100 = statistics.mean(scores_window)
@@ -158,7 +190,7 @@ def run_training(
                         ending = "unknown"
 
                     elapsed = time.perf_counter() - start_time
-                    short_loss = statistics.mean(short_losses) if short_losses else float("nan")
+                    short_loss = statistics.mean(short_losses) if short_losses else None
                     train_logger.log(
                         {
                             "episode": episode,
@@ -166,9 +198,10 @@ def run_training(
                             "steps": steps,
                             "mean100": mean100,
                             "epsilon": epsilon,
-                            "short_loss": short_loss,
+                            "short_loss": "" if short_loss is None else short_loss,
                             "long_loss": "" if long_loss is None else long_loss,
                             "target_syncs": agent.target_syncs,
+                            "replay_updates": replay_updates,
                             "wall": int(ending == "wall"),
                             "self": int(ending == "self"),
                             "timeout": int(ending == "timeout"),
@@ -178,13 +211,14 @@ def run_training(
                     )
 
                     if episode == 1 or episode % train_config.log_every == 0:
+                        short_loss_str = "n/a" if short_loss is None else f"{short_loss:.4f}"
                         long_loss_str = "n/a" if long_loss is None else f"{long_loss:.4f}"
                         print(
                             f"[{episode:4d}/{train_config.episodes:4d}] "
                             f"score={score:2d} steps={steps:3d} mean100={mean100:5.2f} "
-                            f"eps={epsilon:.3f} short={short_loss:.4f} "
-                            f"long={long_loss_str} end={ending} "
-                            f"t={elapsed:6.1f}s",
+                            f"eps={epsilon:.3f} short={short_loss_str} "
+                            f"long={long_loss_str} replay={replay_updates} "
+                            f"end={ending} t={elapsed:6.1f}s",
                             flush=True,
                         )
 
@@ -244,6 +278,7 @@ def run_training(
         "train_seconds": elapsed,
         "train_steps": total_steps,
         "updates": agent.updates,
+        "replay_updates": total_replay_updates,
         "target_syncs": agent.target_syncs,
         "steps_per_second": (total_steps / elapsed) if elapsed else 0.0,
         "final_eval": None if final_eval is None else final_eval.to_dict(),
@@ -256,7 +291,8 @@ def run_training(
     if final_eval is not None:
         print()
         print(f"final greedy eval: {format_eval(final_eval)}")
-        print(f"train: {total_steps} steps in {elapsed:.1f}s ({total_steps / elapsed:.1f} steps/s)")
+        print(f"train: {total_steps} steps in {elapsed:.1f}s ({total_steps / elapsed:.1f} steps/s); "
+              f"updates={agent.updates}, replay_updates={total_replay_updates}")
     return summary
 
 
@@ -274,7 +310,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--checkpoint-every", type=int, default=50)
     parser.add_argument("--log-every", type=int, default=10)
     parser.add_argument("--no-short-memory", action="store_false", dest="short_memory",
-                        help="关闭参考项目的 per-step 单样本更新")
+                        help="关闭参考项目的 per-step 单样本更新（replay 模式下自动忽略）")
+    parser.add_argument("--replay-update-every", type=int, default=None,
+                        help="每 N 个环境步做一次 replay minibatch 更新；0=关闭"
+                             "（默认 features11=0，board=2）")
+    parser.add_argument("--min-replay-size", type=int, default=None,
+                        help="replay 至少多少条才开始更新（default: 0/1000）")
     parser.add_argument("--render", action="store_true", help="训练时渲染（很慢，只用于观察）")
     parser.add_argument("--render-fps", type=int, default=30)
 
@@ -294,8 +335,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hidden-size", type=int, default=256)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--gamma", type=float, default=0.9)
-    parser.add_argument("--batch-size", type=int, default=1000)
-    parser.add_argument("--max-memory", type=int, default=100_000)
+    parser.add_argument("--batch-size", type=int, default=None,
+                        help="replay minibatch 大小（default: 1000 features11 / 128 board）")
+    parser.add_argument("--max-memory", type=int, default=None,
+                        help="replay 容量（default: 100000 features11 / 20000 board）")
     parser.add_argument("--epsilon-start", type=float, default=0.4)
     parser.add_argument("--epsilon-end", type=float, default=0.0)
     parser.add_argument("--epsilon-decay-games", type=int, default=80)
@@ -312,13 +355,30 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     # 其他
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "cuda", "auto"])
+    parser.add_argument("--device", type=str, default=None,
+                        choices=["cpu", "cuda", "auto"],
+                        help="默认 cpu（features11）/ auto（board，有 CUDA 就用 GPU）")
     parser.add_argument("--output-dir", type=str, default=None)
     return parser
 
 
 def main() -> None:
     args = build_arg_parser().parse_args()
+    board = args.obs_type == "board"
+
+    batch_size = args.batch_size if args.batch_size is not None else (128 if board else 1000)
+    max_memory = args.max_memory if args.max_memory is not None else (20_000 if board else 100_000)
+    replay_update_every = (
+        args.replay_update_every
+        if args.replay_update_every is not None
+        else (2 if board else 0)
+    )
+    min_replay_size = (
+        args.min_replay_size
+        if args.min_replay_size is not None
+        else (1000 if replay_update_every > 0 else 0)
+    )
+    device = args.device if args.device is not None else ("auto" if board else "cpu")
 
     env_config = EnvConfig(
         width=args.width,
@@ -334,8 +394,8 @@ def main() -> None:
         hidden_size=args.hidden_size,
         lr=args.lr,
         gamma=args.gamma,
-        batch_size=args.batch_size,
-        max_memory=args.max_memory,
+        batch_size=batch_size,
+        max_memory=max_memory,
         epsilon_start=args.epsilon_start,
         epsilon_end=args.epsilon_end,
         epsilon_decay_games=args.epsilon_decay_games,
@@ -346,7 +406,12 @@ def main() -> None:
         huber=args.huber,
         seed=args.seed,
     )
-    output_dir = args.output_dir or f"runs/stage1_seed{args.seed}"
+    if args.output_dir:
+        output_dir = args.output_dir
+    elif board:
+        output_dir = f"runs/stage3_board_seed{args.seed}"
+    else:
+        output_dir = f"runs/stage1_seed{args.seed}"
     train_config = TrainConfig(
         episodes=args.episodes,
         eval_every=args.eval_every,
@@ -355,11 +420,13 @@ def main() -> None:
         log_every=args.log_every,
         final_eval_episodes=args.final_eval_episodes,
         short_memory=args.short_memory,
+        replay_update_every=replay_update_every,
+        min_replay_size=min_replay_size,
         render=args.render,
         render_fps=args.render_fps,
         seed=args.seed,
         output_dir=output_dir,
-        device=args.device,
+        device=device,
     )
 
     run_training(env_config, dqn_config, train_config)

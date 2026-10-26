@@ -135,7 +135,13 @@ class DQNConfig:
 
 @dataclass(frozen=True)
 class TrainConfig:
-    """训练循环的配置（与算法超参数分开）。"""
+    """训练循环的配置（与算法超参数分开）。
+
+    ``replay_update_every > 0`` 时使用标准 DQN 的 replay minibatch 更新：
+    每 N 个环境步从 replay 采样一个 ``batch_size`` 的 batch 更新一次，
+    并关闭 per-step 的 short-memory 更新和每局结束的 long-memory 更新。
+    这比 batch=1 的更新更适合 GPU。
+    """
 
     episodes: int = 500
     eval_every: int = 50
@@ -144,6 +150,8 @@ class TrainConfig:
     log_every: int = 10
     final_eval_episodes: int = 100
     short_memory: bool = True
+    replay_update_every: int = 0
+    min_replay_size: int = 0
     render: bool = False
     render_fps: int = 30
     seed: int = 0
@@ -161,3 +169,7 @@ class TrainConfig:
             raise ValueError("log_every 至少为 1")
         if self.render_fps < 1:
             raise ValueError("render_fps 至少为 1")
+        if self.replay_update_every < 0:
+            raise ValueError("replay_update_every 不能为负")
+        if self.min_replay_size < 0:
+            raise ValueError("min_replay_size 不能为负")

@@ -10,7 +10,8 @@
 
 ```bash
 cd snake_rl
-uv sync        # 创建 .venv 并安装依赖；torch 为 CPU 版
+uv sync        # 创建 .venv 并安装依赖；torch 为 CUDA 版（cu130）
+uv run python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
 
 ## 常用命令
@@ -26,10 +27,12 @@ uv run python scripts/train_dqn.py
 uv run python scripts/train_dqn.py --episodes 5 --eval-every 0 \
     --checkpoint-every 0 --final-eval-episodes 2 --output-dir /tmp/snake_smoke
 
-# Stage 3：全棋盘 CNN
-# 每个 transition 约 2×5×20×20 float32，先用小 replay 控制内存。
+# Stage 3：全棋盘 CNN（GPU）
+# board 模式默认：device=auto、batch_size=128、replay_update_every=2、
+# max_memory=20000。每个 transition 约 2×5×20×20 float32。
 uv run python scripts/train_dqn.py --obs-type board --board-channels 5 \
-    --episodes 500 --max-memory 20000 --output-dir runs/stage3_board_seed0
+    --episodes 500 --use-target-network --target-sync-every 1000 --double-dqn \
+    --output-dir runs/stage3_board_seed0
 
 # 用 greedy 策略评估 checkpoint
 uv run python scripts/evaluate.py --run-dir runs/stage1_seed0 --episodes 100
@@ -44,14 +47,31 @@ uv run python scripts/random_agent.py --episodes 100
 uv run python scripts/play_human.py
 ```
 
-`--device` 可选 `cpu` / `cuda` / `auto`。默认 `cpu`：11 维网络只有
-`11 → 256 → 3`，每步做一次 batch=1 更新，实测 GPU 反而慢约 5 倍。
-详见 [`pyproject.toml`](pyproject.toml) 里的注释。
+`--device` 可选 `cpu` / `cuda` / `auto`。默认值按观察类型决定：
 
-全棋盘 CNN（`--obs-type board`）计算量大得多，CPU 只适合 smoke test；
-正式训练建议 GPU（需要换 CUDA 版 torch）。全棋盘 replay 也比 11 维大很多：
-每个 transition 约 `2 × C × H × W` 个 float32，100k 条约 1.6GB（5 通道、20×20），
-建议先用 `--max-memory 20000`。
+- `features11`：`cpu`。11 维网络只有 `11 → 256 → 3`，每步 batch=1 更新，
+  实测 GPU 反而慢约 5 倍。
+- `board`：`auto`，有 CUDA 就用 GPU。全棋盘 CNN 计算量大得多，CPU 只适合 smoke test。
+
+全棋盘 replay 比 11 维大很多：
+每个 transition 约 `2 × C × H × W` 个 float32，100k 条约 1.6GB（5 通道、20×20）。
+board 模式默认 `--max-memory 20000`（约 320MB）。
+
+### GPU 训练：replay minibatch 更新
+
+旧的 per-step `batch=1` 更新在 GPU 上利用率很低。board 模式默认改成标准 DQN 的
+replay minibatch 更新：
+
+- `--batch-size 128`：每次从 replay 采样 128 条；
+- `--replay-update-every 2`：每 2 个环境步更新一次；
+- `--min-replay-size 1000`：replay 至少有 1000 条才开始更新。
+
+这相当于把“每步 1 个样本”换成“每 2 步 128 个样本”，更适合 GPU。
+8GB 显存下可以尝试 `--batch-size 256` 或 `512`；想回到旧的 Stage 1/2
+更新方式，用 `--replay-update-every 0`。
+
+GPU 训练时脚本会自动设置 `cudnn.benchmark`、TF32 和 `torch.set_num_threads(1)`，
+减少 CPU 线程和 GPU 争抢。
 
 ### WSL 下的线程数（重要）
 
@@ -63,7 +83,7 @@ WSL 里 PyTorch 默认吃满所有 CPU 线程，对这么小的网络是负优�
 | 默认（12 线程）     | 71      |
 | `OMP_NUM_THREADS=4` | **739** |
 
-跑训练前先限制线程数：
+跑 CPU 训练前先限制线程数（GPU 训练时脚本会自动 `torch.set_num_threads(1)`）：
 
 ```bash
 OMP_NUM_THREADS=4 uv run python scripts/train_dqn.py
@@ -75,7 +95,7 @@ OMP_NUM_THREADS=4 uv run python scripts/train_dqn.py
 snake_rl/
 ├── snake_rl/          # 包
 │   ├── config.py      # EnvConfig / DQNConfig / TrainConfig
-│   ├── env/           # 纯逻辑环境、11 维观察、pygame 渲染
+│   ├── env/           # 纯逻辑环境、11 维观察、全棋盘观察、pygame 渲染
 │   ├── models/        # QNet（11 维 MLP）/ BoardQNet（全棋盘 CNN）
 │   ├── agents/        # DQNAgent + ReplayBuffer
 │   └── training/      # 训练循环、评估、CSV 日志
@@ -110,8 +130,8 @@ Stage 1 最终结果（100 局 greedy eval，训练/评估种子分离）：
 
 - 依赖的唯一真源是 [`pyproject.toml`](pyproject.toml) + `uv.lock`；
   需要 `requirements.txt` 时用 `uv export --no-dev > requirements.txt` 生成。
-- torch 从 `pytorch-cpu` 索引安装（约 200MB）。要换 CUDA 版：删掉
-  `pyproject.toml` 里的 `[[tool.uv.index]]` 和 `[tool.uv.sources]`，
-  然后 `uv lock && uv sync`。
+- torch 从 PyTorch 官方 `cu130` 索引安装（约 2.5GB，适配 RTX 5060 / CUDA 13.x）。
+  只跑 11 维 MLP、想回到 CPU：把 `pyproject.toml` 里的索引换成
+  `https://download.pytorch.org/whl/cpu`，再 `uv lock && uv sync`。
 - 训练产物在 `runs/<run_name>/`：`config.json`、`train.csv`、`eval.csv`、
   `checkpoint.pt`、`final_eval.json`、`summary.json`、`curve.png`。

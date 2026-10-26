@@ -22,16 +22,17 @@ dev = [
     "pytest>=8.0",
 ]
 
-# torch 默认从 PyPI 拿到的是 CUDA 轮子（约 2.5GB）。
-# 这个项目在 CPU 上训练更快，这里显式锁定 CPU 索引（约 200MB）。
-# 以后想换 CUDA：删掉下面两段，重新 `uv lock`。
+# 全棋盘 CNN 需要 CUDA。torch 从 PyTorch 官方 cu130 索引安装
+# （RTX 5060 / Blackwell，驱动 CUDA 13.3；约 2.5GB）。
+# 如果只是跑 11 维 MLP、想回到 CPU：把索引换成
+# https://download.pytorch.org/whl/cpu，再 `uv lock && uv sync`。
 [[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.uv.sources]
-torch = { index = "pytorch-cpu" }
+torch = { index = "pytorch-cu130" }
 
 [tool.setuptools.packages.find]
 include = ["snake_rl*"]
