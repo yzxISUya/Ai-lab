@@ -1,4 +1,0 @@
-# Stage 0 运行依赖
-numpy>=1.26
-pygame>=2.5
-pytest>=8.0
