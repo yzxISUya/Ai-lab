@@ -4,7 +4,6 @@
 
 # 训练产物
 runs/
-models/
 *.pth
 *.pt
 *.log
