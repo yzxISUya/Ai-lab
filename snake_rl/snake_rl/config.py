@@ -68,6 +68,9 @@ class DQNConfig:
 
     ``double_dqn`` 把“选动作”和“评估动作”分开：在线网络选 argmax，目标网络评估。
     它依赖目标网络，所以 ``double_dqn=True`` 时要求 ``use_target_network=True``。
+
+    ``huber=True`` 用 SmoothL1 代替 MSE，降低大 TD error 的影响。Huber 的 loss
+    数值尺度和 MSE 不同，不能直接比较两者的 loss 大小。
     """
 
     obs_size: int = 11
@@ -84,6 +87,7 @@ class DQNConfig:
     use_target_network: bool = False
     target_sync_every: int = 1000
     double_dqn: bool = False
+    huber: bool = False
     seed: int = 0
 
     def __post_init__(self) -> None:

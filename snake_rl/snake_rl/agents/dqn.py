@@ -131,7 +131,7 @@ class DQNAgent:
         self.target_model.eval()
 
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.config.lr)
-        self.criterion = nn.MSELoss()
+        self.criterion = nn.SmoothL1Loss() if self.config.huber else nn.MSELoss()
 
         self.memory = ReplayBuffer(self.config.max_memory, seed=self.config.seed)
         self.rng = random.Random(self.config.seed + 1)

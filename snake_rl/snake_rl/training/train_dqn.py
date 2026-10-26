@@ -306,6 +306,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help="每多少次 train_step 把在线网络同步到目标网络")
     parser.add_argument("--double-dqn", action="store_true",
                         help="Stage 2：在线网络选动作、目标网络评估（需要目标网络）")
+    parser.add_argument("--huber", action="store_true",
+                        help="Stage 2：用 SmoothL1/Huber loss 代替 MSE")
 
     # 其他
     parser.add_argument("--seed", type=int, default=0)
@@ -336,6 +338,7 @@ def main() -> None:
         use_target_network=args.use_target_network,
         target_sync_every=args.target_sync_every,
         double_dqn=args.double_dqn,
+        huber=args.huber,
         seed=args.seed,
     )
     output_dir = args.output_dir or f"runs/stage1_seed{args.seed}"

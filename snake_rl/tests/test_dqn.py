@@ -193,6 +193,11 @@ def test_double_dqn_requires_target_network() -> None:
         DQNConfig(double_dqn=True, use_target_network=False)
 
 
+def test_huber_selects_smooth_l1_loss() -> None:
+    assert isinstance(DQNAgent(DQNConfig(seed=0, huber=False)).criterion, nn.MSELoss)
+    assert isinstance(DQNAgent(DQNConfig(seed=0, huber=True)).criterion, nn.SmoothL1Loss)
+
+
 def test_compute_targets_double_dqn_separates_selection_and_evaluation() -> None:
     agent = DQNAgent(
         DQNConfig(
@@ -351,6 +356,7 @@ def test_checkpoint_roundtrip_preserves_target_network(tmp_path) -> None:
             use_target_network=True,
             target_sync_every=10,
             double_dqn=True,
+            huber=True,
         )
     )
     agent.train_step(_update_batch())
@@ -362,6 +368,7 @@ def test_checkpoint_roundtrip_preserves_target_network(tmp_path) -> None:
 
     assert loaded.config.use_target_network
     assert loaded.config.double_dqn
+    assert loaded.config.huber
     assert loaded.updates == agent.updates == 1
     assert loaded.target_syncs == agent.target_syncs == 1
     for expected, actual in zip(
