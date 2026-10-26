@@ -6,6 +6,11 @@ dist/
 wheels/
 *.egg-info/
 
+# 测试 / 类型 / lint 缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
 # 虚拟环境
 .venv/
 

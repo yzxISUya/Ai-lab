@@ -6,8 +6,8 @@ r"""随机策略基线。
 
 运行::
 
-    .\.venv\Scripts\python.exe scripts\random_agent.py --episodes 100
-    .\.venv\Scripts\python.exe scripts\random_agent.py --episodes 20 --render --fps 12
+    uv run python scripts/random_agent.py --episodes 100
+    uv run python scripts/random_agent.py --episodes 20 --render --fps 12
 """
 
 from __future__ import annotations

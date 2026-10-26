@@ -11,17 +11,27 @@ requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.26",
     "pygame>=2.5",
-]
-
-[project.optional-dependencies]
-train = [
+    # 训练也需要，直接放进主依赖：`uv sync` 一次装齐。
     "torch>=2.6",
     "matplotlib>=3.8",
     "tqdm>=4.66",
 ]
+
+[dependency-groups]
 dev = [
     "pytest>=8.0",
 ]
+
+# torch 默认从 PyPI 拿到的是 CUDA 轮子（约 2.5GB）。
+# 这个项目在 CPU 上训练更快，这里显式锁定 CPU 索引（约 200MB）。
+# 以后想换 CUDA：删掉下面两段，重新 `uv lock`。
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
 
 [tool.setuptools.packages.find]
 include = ["snake_rl*"]

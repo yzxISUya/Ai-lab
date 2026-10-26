@@ -1,17 +1,9 @@
-.venv/
-__pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-build/
-
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
+# 本项目的忽略规则。
+# 通用规则（__pycache__/、.venv/、.pytest_cache/、*.egg-info/ 等）在仓库根
+# 的 .gitignore 里，不要在这里重复。
 
 # 训练产物
 runs/
-checkpoints/
 models/
 *.pth
 *.pt
@@ -24,6 +16,8 @@ reference/
 .idea/
 .vscode/
 
-# 草稿
+# 草稿（本地博客草稿）
 SHIT/
+
+# 本地课程与实验记录，暂不入库
 teach/

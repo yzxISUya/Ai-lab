@@ -2,7 +2,7 @@ r"""读取训练日志并画曲线。
 
 运行::
 
-    .\.venv\Scripts\python.exe scripts\plot_training.py --run-dir runs\stage1_seed0
+    uv run python scripts/plot_training.py --run-dir runs/stage1_seed0
 
 输出默认是 ``runs/stage1_seed0/curve.png``。
 """

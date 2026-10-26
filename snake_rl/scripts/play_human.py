@@ -2,7 +2,7 @@ r"""人类试玩。
 
 运行::
 
-    .\.venv\Scripts\python.exe scripts\play_human.py
+    uv run python scripts/play_human.py
 
 操作：
 - 方向键 / WASD：转向（绝对方向，脚本会自动翻译成相对动作）

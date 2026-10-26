@@ -2,7 +2,7 @@ r"""用 greedy 策略评估一个 Stage 1 checkpoint。
 
 运行::
 
-    .\.venv\Scripts\python.exe scripts\evaluate.py --run-dir runs\stage1_seed0
+    uv run python scripts/evaluate.py --run-dir runs/stage1_seed0
 """
 
 from __future__ import annotations
