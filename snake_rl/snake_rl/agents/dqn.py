@@ -336,5 +336,11 @@ class DQNAgent:
         if "replay_rng_state" in payload:
             agent.memory.rng.setstate(payload["replay_rng_state"])
         if payload.get("cuda_rng_state") and torch.cuda.is_available():
-            torch.cuda.set_rng_state_all(payload["cuda_rng_state"])
+            # map_location=device 也可能把 RNG state 映射到 GPU；
+            # torch.cuda.set_rng_state_all 要求 CPU ByteTensor。
+            cuda_states = [
+                state.cpu() if torch.is_tensor(state) else state
+                for state in payload["cuda_rng_state"]
+            ]
+            torch.cuda.set_rng_state_all(cuda_states)
         return agent

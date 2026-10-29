@@ -348,6 +348,20 @@ def test_checkpoint_roundtrip(tmp_path) -> None:
     np.testing.assert_allclose(loaded.q_values(obs), q_before, rtol=1e-6, atol=1e-6)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="需要 CUDA")
+def test_checkpoint_roundtrip_with_cuda_rng(tmp_path) -> None:
+    agent = DQNAgent(DQNConfig(seed=123, hidden_size=16), device="cuda")
+    obs = np.linspace(0.0, 1.0, 11, dtype=np.float32)
+    q_before = agent.q_values(obs)
+
+    path = tmp_path / "checkpoint_cuda.pt"
+    agent.save(path)
+    loaded = DQNAgent.load(path, device="cuda")
+
+    assert loaded.device.type == "cuda"
+    np.testing.assert_allclose(loaded.q_values(obs), q_before, rtol=1e-6, atol=1e-6)
+
+
 def test_checkpoint_roundtrip_preserves_target_network(tmp_path) -> None:
     agent = DQNAgent(
         DQNConfig(
