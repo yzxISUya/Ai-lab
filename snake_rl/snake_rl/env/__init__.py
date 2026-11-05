@@ -17,6 +17,7 @@ from .snake_env import (
     StepOutcome,
     relative_action,
 )
+from .vector_env import VectorSnakeEnv
 
 __all__ = [
     "Action",
@@ -29,4 +30,5 @@ __all__ = [
     "BOARD_CHANNEL_NAMES",
     "BOARD_CHANNELS",
     "observe_board",
+    "VectorSnakeEnv",
 ]

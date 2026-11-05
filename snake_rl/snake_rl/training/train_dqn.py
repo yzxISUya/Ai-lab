@@ -409,7 +409,8 @@ def main() -> None:
     if args.output_dir:
         output_dir = args.output_dir
     elif board:
-        output_dir = f"runs/stage3_board_seed{args.seed}"
+        size_suffix = f"_{args.width}x{args.height}" if (args.width != 20 or args.height != 20) else ""
+        output_dir = f"runs/stage3_board{size_suffix}_seed{args.seed}"
     else:
         output_dir = f"runs/stage1_seed{args.seed}"
     train_config = TrainConfig(

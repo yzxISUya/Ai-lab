@@ -52,6 +52,25 @@ def test_board_qnet_output_shape() -> None:
     assert out.shape == (4, 3)
 
 
+def test_adaptive_board_qnet_cross_dimensions() -> None:
+    # 启用自适应池化 (3, 3)
+    net = BoardQNet(
+        in_channels=5,
+        hidden_size=32,
+        output_size=3,
+        adaptive_pool_size=(3, 3),
+    )
+    # 无论是 10x10、8x12 还是 20x20，前向传播都不报维度错误
+    out_10 = net(torch.zeros(2, 5, 10, 10))
+    out_20 = net(torch.zeros(2, 5, 20, 20))
+    out_rect = net(torch.zeros(2, 5, 8, 16))
+
+    assert out_10.shape == (2, 3)
+    assert out_20.shape == (2, 3)
+    assert out_rect.shape == (2, 3)
+    assert net.flat_size == 64 * 3 * 3
+
+
 def test_agent_board_observation_forward_and_update() -> None:
     config = DQNConfig(
         obs_type="board",

@@ -426,34 +426,76 @@ OMP_NUM_THREADS=4 timeout -s INT 2700 uv run python scripts/train_dqn.py \
 
 ---
 
-### E9 · 计划中 / 未执行
+### E9 · Stage 3：10×10 小棋盘 CNN 课程学习（Colab L4 GPU，成功！）
 
-按优先级：
+- **目的/假设**：验证在较小状态空间（10×10 棋盘，100 格）下，全棋盘 CNN 能否克服 20×20 上的局部最优（绕圈超时），真正学会“寻找食物并长大”。
+- **变量**：
+  - 棋盘尺寸：`20×20` → `10×10`；
+  - 超时阈值系数：`100` → `50`（最大无进食步数 500）；
+  - 训练预算：1,500 episodes（约 14.5 万步）；
+  - 硬件环境：Google Colab NVIDIA L4 GPU (24GB VRAM)；
+  - 批大小：256，Replay 池容量：50,000，更新间隔：2 步。
+- **命令**：
+```bash
+python scripts/train_dqn.py \
+  --obs-type board --board-channels 5 \
+  --width 10 --height 10 \
+  --timeout-factor 50 --episodes 1500 \
+  --eval-every 50 --eval-episodes 20 --final-eval-episodes 100 \
+  --checkpoint-every 100 --log-every 25 \
+  --batch-size 256 --max-memory 50000 \
+  --min-replay-size 1000 --replay-update-every 2 \
+  --epsilon-start 1.0 --epsilon-end 0.05 --epsilon-decay-games 600 \
+  --use-target-network --target-sync-every 1000 --double-dqn \
+  --device cuda --output-dir runs/stage3_board_10x10_seed0
+```
+- **结果**：
 
-1. **10×10 课程学习（最推荐，仍然纯 RL）**
-   - 全棋盘 CNN、同样的目标网络 + Double；
-   - 棋盘更小，食物更容易撞到；episode 更短；
-   - 预计 10–15 分钟先验证“能否学会找食物”；
-   - 学会后再扩到 20×20（FC 尺寸会变；可以重训，或改成全卷积 + global pooling）。
-2. **20×20 上改探索/奖励/超时**
-   - epsilon 下限 0.1–0.2，衰减更慢；
-   - timeout reward 更负（如 -20）或缩短 timeout，打破“绕圈安全”；
-   - 这会改变奖励/探索设计，不再是完全原始的 Stage 3 设定。
-3. **奖励塑形**
-   - potential-based shaping，例如 `Phi(s) = -BFS 距离`；
-   - 理论上保持最优策略，但注入领域知识，与“纯 RL”目标冲突。
-4. **更多算力/更长训练**
-   - 全棋盘 CNN 可能需要数小时到数天；
-   - 但先解决局部最优，否则加时间只会更稳定地绕圈。
-5. **观察工程**
-   - 距离/坐标/食物中心通道，或局部 patch + 射线；
-   - 样本效率会高很多，但不是纯全棋盘。
-6. **补 Stage 2 缺口**
-   - target-only seed 1/2（确认目标网络单独版是否真的有害）；
-   - epsilon 调度（5% 下限 / 150 局）；
-   - 梯度裁剪；
-   - 11 维上的标准 replay minibatch 更新。
-     这些在 11 维上限下预期收益有限，优先级低于 Stage 3 课程学习。
+| 指标 | E7 (20×20 全棋盘长训练) | E9 (10×10 课程学习，Colab L4) | 结论 / 改善幅度 |
+| :--- | :---: | :---: | :--- |
+| **评估均分 (Eval Mean)** | 0.00 | **9.73** (seed=10,000) / **9.30** (seed=20,000) | **彻底突破**，平均每局吃 9~10 个食物 |
+| **最高分 (Max Score)** | 0 | **21** | 身体最长达到 24 格（占全图近 1/4） |
+| **超时死占比 (Timeout)** | **100%** | **2% ~ 3%** | 彻底摆脱了死板绕圈的局部最优 |
+| **撞自身死 (Self Collision)** | 0% | **84% ~ 86%** | **真正进入“因为身体变长而难以闪避”的贪吃蛇本质博弈阶段** |
+| **步均得分 (Score/step)** | 0.000 | **0.0835** | 约每 12 步吃到一次食物 |
+| **训练总耗时** | 2,697s (179 步/秒) | 445.6s (~325 步/秒) | 7.4 分钟即完成 1500 局训练 |
+
+- **分析**：
+  1. **课程学习效果显著**：在 10×10 棋盘上，初始探索更容易撞击到食物，正向奖励信号密度大增，策略迅速收敛到以吃食物为目标的轨道。
+  2. **从“消极求生”转为“长身博弈”**：死因从 100% 超时转变为 86% 自身相撞，证明模型已经彻底掌握追逐食物和防撞墙能力，进入了贪吃蛇高维博弈区。
+  3. **单环境硬件利用率瓶颈显现**：在 24GB L4 GPU 上，串行架构吞吐量仅 ~325 steps/s，GPU 利用率长期低于 5%，计算大部分时间卡在 Python 单步循环与 CPU<->GPU 传输。
+
+---
+
+### E10 · 架构重构：向量化并行 DQN + 自适应池化（L4 GPU 极致吞吐）
+
+- **目的/假设**：
+  1. 通过环境向量化（$N=32$ 并行）和纯显存张量回放池（uint8 压缩），将 L4 GPU 吞吐从 ~325 steps/s 提升至 5,000+ steps/s（15x+ 加速）；
+  2. 引入 `AdaptiveAvgPool2d(3, 3)`，解耦卷积特征提取与全连接层维度，实现 10×10 权重直接 Zero-Shot 迁移到 20×20 棋盘。
+- **重构产物**：
+  - `snake_rl/env/vector_env.py`：`VectorSnakeEnv` 同步多环境步进；
+  - `snake_rl/agents/tensor_replay_buffer.py`：显存连续张量预分配，uint8 量化存储；
+  - `snake_rl/agents/batched_dqn.py`：批量推理决策与 Bfloat16 AMP 梯度更新；
+  - `snake_rl/models/board_qnet.py`：集成自适应平均池化 `adaptive_pool_size=(3, 3)`；
+  - `scripts/benchmark_fps.py` & `scripts/train_vector_dqn.py` & `colab_E10_vectorized.ipynb`。
+- **本地 CPU 吞吐基准（500 步实测）**：
+  - 串行基线 (N=1)  : 558.3 steps/s (1.00x)
+  - 向量并行 (N=8)  : 1147.3 steps/s (2.05x)
+  - 向量并行 (N=32) : **3396.0 steps/s (6.08x)**
+  - *注：在 L4 GPU 配合 AMP 与显存张量回放池时，预计加速比达 15x~25x（吞吐超 5,000~8,000 steps/s）。*
+- **单元测试**：66 个测试全部通过 (`tests/test_vector_env.py`, `tests/test_tensor_buffer.py`, `tests/test_batched_dqn.py` 等)。
+
+---
+
+### E11 · 计划中 / 下一步
+
+1. **Colab L4 上运行 E10 向量化训练与 FPS 基准**：
+   - 验证 L4 GPU 下吞吐性能与利用率；
+   - 运行 20 万步训练（仅需约 1 分钟）。
+2. **Zero-Shot 跨棋盘泛化验证**：
+   - 使用自适应池化训练的 10×10 权重直接在 20×20 棋盘上评估；
+   - 对比 20×20 随机基线与未经迁移的纯 20×20 CNN；
+   - 在 20×20 上进行轻量微调（Fine-tuning），实现完整的课程迁移。
 
 ---
 

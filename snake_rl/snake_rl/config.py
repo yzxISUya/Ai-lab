@@ -84,6 +84,7 @@ class DQNConfig:
     board_channels: int = 5
     board_height: int = 20
     board_width: int = 20
+    adaptive_pool_size: tuple[int, int] | int | None = None
     n_actions: int = 3
     hidden_size: int = 256
     lr: float = 1e-3

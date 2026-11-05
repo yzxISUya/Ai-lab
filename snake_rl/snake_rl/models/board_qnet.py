@@ -11,7 +11,7 @@ import torch.nn.functional as F
 
 
 class BoardQNet(nn.Module):
-    """``C×H×W -> 3`` 的小 CNN。"""
+    """``C×H×W -> 3`` 的小 CNN。支持固定展平或自适应池化 (Adaptive Pooling)。"""
 
     def __init__(
         self,
@@ -20,6 +20,7 @@ class BoardQNet(nn.Module):
         width: int = 20,
         hidden_size: int = 256,
         output_size: int = 3,
+        adaptive_pool_size: tuple[int, int] | int | None = None,
     ):
         super().__init__()
         if in_channels < 1 or height < 1 or width < 1:
@@ -27,12 +28,22 @@ class BoardQNet(nn.Module):
 
         self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        # stride=2 把 20×20 压到 10×10，减少后面的全连接层。
+        # stride=2 把尺寸压半，减少后面的参数量。
         self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1)
 
-        out_h = (height + 2 * 1 - 3) // 2 + 1
-        out_w = (width + 2 * 1 - 3) // 2 + 1
-        flat_size = 64 * out_h * out_w
+        if isinstance(adaptive_pool_size, int):
+            adaptive_pool_size = (adaptive_pool_size, adaptive_pool_size)
+
+        self.adaptive_pool = (
+            nn.AdaptiveAvgPool2d(adaptive_pool_size) if adaptive_pool_size is not None else None
+        )
+
+        if self.adaptive_pool is not None:
+            flat_size = 64 * adaptive_pool_size[0] * adaptive_pool_size[1]
+        else:
+            out_h = (height + 2 * 1 - 3) // 2 + 1
+            out_w = (width + 2 * 1 - 3) // 2 + 1
+            flat_size = 64 * out_h * out_w
 
         self.fc1 = nn.Linear(flat_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, output_size)
@@ -42,6 +53,8 @@ class BoardQNet(nn.Module):
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
+        if self.adaptive_pool is not None:
+            x = self.adaptive_pool(x)
         x = x.flatten(1)
         x = F.relu(self.fc1(x))
         return self.fc2(x)

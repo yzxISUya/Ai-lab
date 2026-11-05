@@ -98,12 +98,14 @@ class ReplayBuffer:
 class DQNAgent:
     """DQN 智能体：动作选择、经验存储、TD 更新、checkpoint。"""
 
-    def __init__(self, config: DQNConfig | None = None, device: str = "cpu"):
+    def __init__(self, config: DQNConfig | None = None, device: str | torch.device = "cpu"):
         self.config = config or DQNConfig()
 
-        if device == "auto":
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        if device.startswith("cuda") and not torch.cuda.is_available():
+        if isinstance(device, torch.device):
+            dev_str = device.type
+        else:
+            dev_str = "cuda" if device == "auto" and torch.cuda.is_available() else device
+        if dev_str.startswith("cuda") and not torch.cuda.is_available():
             raise RuntimeError("请求了 CUDA，但当前 PyTorch 没有可用的 CUDA")
         self.device = torch.device(device)
 
@@ -140,6 +142,7 @@ class DQNAgent:
                 width=self.config.board_width,
                 hidden_size=self.config.hidden_size,
                 output_size=self.config.n_actions,
+                adaptive_pool_size=self.config.adaptive_pool_size,
             ).to(self.device)
         return QNet(
             input_size=self.config.obs_size,
