@@ -96,3 +96,34 @@ def test_batched_agent_adaptive_cross_dim() -> None:
 
     assert a10.shape == (4,)
     assert a20.shape == (4,)
+
+
+def test_batched_agent_load_model_weights_cross_dim(tmp_path) -> None:
+    # 1. 10x10 Agent 保存权重
+    cfg10 = DQNConfig(
+        obs_type="board",
+        board_channels=5,
+        board_height=10,
+        board_width=10,
+        adaptive_pool_size=(3, 3),
+        seed=1,
+    )
+    agent10 = BatchedDQNAgent(cfg10, device="cpu")
+    ckpt_path = tmp_path / "agent10.pt"
+    agent10.save(ckpt_path)
+
+    # 2. 20x20 Agent 加载该权重进行迁移
+    cfg20 = DQNConfig(
+        obs_type="board",
+        board_channels=5,
+        board_height=20,
+        board_width=20,
+        adaptive_pool_size=(3, 3),
+        seed=2,
+    )
+    agent20 = BatchedDQNAgent(cfg20, device="cpu")
+    agent20.load_model_weights(ckpt_path)
+
+    # 验证权重一致
+    for p1, p2 in zip(agent10.model.parameters(), agent20.model.parameters()):
+        assert torch.allclose(p1, p2)

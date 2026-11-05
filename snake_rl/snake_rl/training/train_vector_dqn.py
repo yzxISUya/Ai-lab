@@ -34,15 +34,17 @@ def run_vector_training(
     dqn_config: DQNConfig,
     num_envs: int = 32,
     total_steps: int = 200_000,
-    update_every: int = 4,
-    updates_per_step: int = 1,
+    update_every: int = 1,
+    updates_per_step: int = 2,
     min_replay_size: int = 2000,
+    epsilon_decay_steps: int | None = None,
     eval_every_steps: int = 10_000,
     eval_episodes: int = 20,
     final_eval_episodes: int = 100,
     output_dir: str = "runs/vector_board_10x10",
     device: str = "auto",
     use_amp: bool = True,
+    init_checkpoint: str | Path | None = None,
 ) -> dict:
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -79,6 +81,14 @@ def run_vector_training(
         use_amp=use_amp,
     )
 
+    if init_checkpoint:
+        ckpt_path = Path(init_checkpoint)
+        if ckpt_path.exists():
+            print(f"  >>> 成功载入预训练权重进行迁移/微调: {ckpt_path}")
+            agent.load_model_weights(ckpt_path)
+        else:
+            raise FileNotFoundError(f"指定的预训练权重不存在: {ckpt_path}")
+
     save_json(
         out_dir / "config.json",
         {
@@ -92,6 +102,7 @@ def run_vector_training(
                 "min_replay_size": min_replay_size,
                 "device": str(dev),
                 "use_amp": agent.use_amp,
+                "init_checkpoint": str(init_checkpoint) if init_checkpoint else None,
             },
         },
     )
@@ -142,7 +153,12 @@ def run_vector_training(
     losses_window = deque(maxlen=50)
 
     # 探索率线性衰减计算
-    decay_steps = dqn_config.epsilon_decay_games * 50  # 约合多少步
+    if epsilon_decay_steps is not None:
+        decay_steps = epsilon_decay_steps
+    elif dqn_config.epsilon_decay_games > 0:
+        decay_steps = dqn_config.epsilon_decay_games * 50
+    else:
+        decay_steps = int(total_steps * 0.5)
 
     with CSVLogger(out_dir / "train.csv", train_fields) as train_logger, CSVLogger(
         out_dir / "eval.csv", eval_fields
@@ -163,8 +179,15 @@ def run_vector_training(
             next_obs, rewards, terms, truncs, infos = venv.step(actions)
             step_count += num_envs
 
-            # 4. 批量直写张量回放池
-            buffer.add_batch(obs, actions, rewards, next_obs, terms, truncs)
+            # 4. 批量直写张量回放池 (对已结束的环境替换为其真实的 final_observation)
+            buffer_next_obs = next_obs
+            if any("final_observation" in info for info in infos):
+                buffer_next_obs = next_obs.copy()
+                for i, info in enumerate(infos):
+                    if "final_observation" in info:
+                        buffer_next_obs[i] = info["final_observation"]
+
+            buffer.add_batch(obs, actions, rewards, buffer_next_obs, terms, truncs)
             obs = next_obs
 
             # 收集结束的回合统计
@@ -279,29 +302,31 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--total-steps", type=int, default=200_000, help="总环境步数 (默认: 200,000)")
     p.add_argument("--width", type=int, default=10, help="棋盘宽度 (默认: 10)")
     p.add_argument("--height", type=int, default=10, help="棋盘高度 (默认: 10)")
-    p.add_argument("--timeout-factor", type=float, default=2.0, help="步数限制因子 (默认: 2.0)")
-    p.add_argument("--timeout-reward", type=float, default=-0.5, help="超时惩罚 (默认: -0.5)")
+    p.add_argument("--timeout-factor", type=float, default=50.0, help="步数限制因子 (默认: 50.0，允许探索)")
+    p.add_argument("--timeout-reward", type=float, default=-10.0, help="超时惩罚 (默认: -10.0)")
     p.add_argument("--obs-type", choices=["board", "features11"], default="board", help="观察空间类型")
     p.add_argument("--board-channels", type=int, default=5, choices=[3, 4, 5], help="棋盘通道数 (默认: 5)")
     p.add_argument("--adaptive-pool-size", type=int, default=3, help="自适应池化尺寸 (3 表示 3x3，<=0 表示禁用)")
-    p.add_argument("--hidden-size", type=int, default=512, help="全连接隐藏层维度 (默认: 512)")
-    p.add_argument("--batch-size", type=int, default=512, help="GPU 梯度批大小 (默认: 512)")
-    p.add_argument("--lr", type=float, default=1e-4, help="学习率 (默认: 1e-4)")
-    p.add_argument("--gamma", type=float, default=0.99, help="折扣因子 (默认: 0.99)")
+    p.add_argument("--hidden-size", type=int, default=256, help="全连接隐藏层维度 (默认: 256)")
+    p.add_argument("--batch-size", type=int, default=256, help="GPU 梯度批大小 (默认: 256)")
+    p.add_argument("--lr", type=float, default=1e-3, help="学习率 (默认: 1e-3)")
+    p.add_argument("--gamma", type=float, default=0.9, help="折扣因子 (默认: 0.9)")
     p.add_argument("--max-memory", type=int, default=200_000, help="张量回放池容量 (默认: 200,000)")
-    p.add_argument("--update-every", type=int, default=4, help="每多少个向量步执行梯度更新 (默认: 4)")
-    p.add_argument("--updates-per-step", type=int, default=1, help="每次更新迭代次数 (默认: 1)")
+    p.add_argument("--update-every", type=int, default=1, help="每多少个向量步执行梯度更新 (默认: 1)")
+    p.add_argument("--updates-per-step", type=int, default=2, help="每次更新迭代次数 (默认: 2)")
     p.add_argument("--min-replay-size", type=int, default=2000, help="开始训练前的最小预热样本数 (默认: 2000)")
     p.add_argument("--epsilon-start", type=float, default=1.0, help="起始探索率 (默认: 1.0)")
     p.add_argument("--epsilon-end", type=float, default=0.05, help="最终探索率 (默认: 0.05)")
-    p.add_argument("--epsilon-decay-games", type=int, default=200, help="探索衰减等效回合数 (默认: 200)")
-    p.add_argument("--target-sync-every", type=int, default=1000, help="目标网络同步间隔步数 (默认: 1000)")
+    p.add_argument("--epsilon-decay-steps", type=int, default=100_000, help="探索线性衰减总环境步数 (默认: 100,000)")
+    p.add_argument("--target-sync-every", type=int, default=500, help="目标网络同步间隔步数 (默认: 500)")
+    p.add_argument("--bootstrap-truncated", action="store_true", help="超时截断时进行 TD 引导 (默认 False，超时视为终止)")
     p.add_argument("--eval-every-steps", type=int, default=10_000, help="评测周期步数 (默认: 10,000)")
     p.add_argument("--eval-episodes", type=int, default=20, help="中期评测回合数 (默认: 20)")
     p.add_argument("--final-eval-episodes", type=int, default=100, help="最终评测回合数 (默认: 100)")
     p.add_argument("--output-dir", type=str, default=None, help="输出目录 (留空自动生成)")
     p.add_argument("--device", type=str, default="auto", help="计算设备 (auto/cuda/cpu)")
     p.add_argument("--no-amp", action="store_true", help="禁用 Bfloat16 AMP 自动混合精度")
+    p.add_argument("--init-checkpoint", type=str, default=None, help="预训练权重路径 (用于迁移/微调)")
     p.add_argument("--seed", type=int, default=0, help="随机种子 (默认: 0)")
     return p
 
@@ -330,8 +355,8 @@ def main(argv: list[str] | None = None) -> dict:
         max_memory=args.max_memory,
         epsilon_start=args.epsilon_start,
         epsilon_end=args.epsilon_end,
-        epsilon_decay_games=args.epsilon_decay_games,
-        bootstrap_truncated=True,
+        epsilon_decay_games=0,
+        bootstrap_truncated=args.bootstrap_truncated,
         use_target_network=True,
         target_sync_every=args.target_sync_every,
         double_dqn=True,
@@ -352,12 +377,14 @@ def main(argv: list[str] | None = None) -> dict:
         update_every=args.update_every,
         updates_per_step=args.updates_per_step,
         min_replay_size=args.min_replay_size,
+        epsilon_decay_steps=args.epsilon_decay_steps,
         eval_every_steps=args.eval_every_steps,
         eval_episodes=args.eval_episodes,
         final_eval_episodes=args.final_eval_episodes,
         output_dir=output_dir,
         device=args.device,
         use_amp=not args.no_amp,
+        init_checkpoint=args.init_checkpoint,
     )
 
 

@@ -27,6 +27,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--episodes", type=int, default=100)
     parser.add_argument("--seed", type=int, default=10_000)
     parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "cuda", "auto"])
+    parser.add_argument("--width", type=int, default=None, help="覆盖棋盘宽度 (用于跨尺寸评测)")
+    parser.add_argument("--height", type=int, default=None, help="覆盖棋盘高度 (用于跨尺寸评测)")
+    parser.add_argument("--timeout-factor", type=float, default=None, help="覆盖超时步数限制因子")
     parser.add_argument("--render", action="store_true")
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--output", type=str, default=None)
@@ -42,12 +45,23 @@ def main() -> None:
 
     cfg = load_json(config_path)
     env_config = EnvConfig(**cfg["env"])
+    if args.width is not None:
+        env_config.width = args.width
+    if args.height is not None:
+        env_config.height = args.height
+    if args.timeout_factor is not None:
+        env_config.max_steps_without_food_factor = args.timeout_factor
 
     checkpoint = Path(args.checkpoint) if args.checkpoint else run_dir / "checkpoint.pt"
     if not checkpoint.exists():
         raise SystemExit(f"找不到 checkpoint: {checkpoint}")
 
     agent = DQNAgent.load(checkpoint, device=args.device)
+    if args.width is not None:
+        agent.config.board_width = args.width
+    if args.height is not None:
+        agent.config.board_height = args.height
+
     env = SnakeEnv(env_config)
 
     renderer = None

@@ -99,15 +99,18 @@ class VectorSnakeEnv:
             truncateds[i] = trunc
 
             info = dict(outcome.info)
+            real_obs = self._observe_one(env)
+
             if term or trunc:
                 info["episode_score"] = env.score
                 info["episode_steps"] = env.steps
+                info["final_observation"] = real_obs
                 self._episode_counts[i] += 1
                 # 自动原地重置
                 env.reset(seed=self.seed + i * 1000 + self._episode_counts[i])
                 self._obs_buf[i] = self._observe_one(env)
             else:
-                self._obs_buf[i] = self._observe_one(env)
+                self._obs_buf[i] = real_obs
 
             infos.append(info)
 

@@ -195,6 +195,15 @@ class BatchedDQNAgent:
             payload["cuda_rng_state"] = torch.cuda.get_rng_state_all()
         torch.save(payload, p)
 
+    def load_model_weights(self, path: str | Path) -> None:
+        """从 checkpoint 中加载模型权重，用于迁移学习 (保持当前 config 不变)。"""
+        payload = torch.load(path, map_location=self.device, weights_only=False)
+        self.model.load_state_dict(payload["model"])
+        if "target_model" in payload and self.config.use_target_network:
+            self.target_model.load_state_dict(payload["target_model"])
+        elif self.config.use_target_network:
+            self.target_model.load_state_dict(payload["model"])
+
     @classmethod
     def load(cls, path: str | Path, device: str = "auto") -> BatchedDQNAgent:
         """加载已保存的检查点。"""
